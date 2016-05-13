@@ -1,14 +1,69 @@
-function output = lipTracker(filepath,flag_plot)
-
+function output = lipTracker(filepath,flag_plot,flag_manual)
 %%% script to perform computation of mouth area
-%%% [SC] Apr-16
-if nargin<2, flag_plot=false; end    
+%%% [SC] May-16
+% This script performs a computation of the mouth area (including lip)
+
+% using mostly hue. The algorithm performs a computation of the colour
+% clusters (mostly skin and lip) using k-means algorithm. The standard
+% deviation of these clusters is estimated fitting up to 5 gaussian
+% distributions to the histogram of the color levles (optimization done
+% through E.M.). To improve the algorithm, some smoothness is applied
+% between frames, so that the area cannot vary >60% between consecutive
+% frames, and the "search area" for the lips also varies accordingly. 
+% The user needs to initiate the alforithm by selecting the search area in
+% the first fram using a GUI.
+
+% This algorithm was tested ONLY with the VidTIMIT database. If your videos
+% have different format, you'll probably need to modify the code accordingly. 
+
+% input:   
+% - filepath. This refers to a location that containts both video and
+%   audio. For VidTIMIT, frames and audio comes in different folders. 
+%   See the example below.
+% - flag_plot. Plot ongoing lip detection.
+% - flag_manual. When the algorithm fails, run with flag_manual=true to check that each frame is labelled correctly and, if necessary, correct the mouth area.
+
+% With flag_manual=true, the user will be prompted to check that the
+% correct mouth area has been selected. If the user intends to select a
+% different area, the user needs to click twice in the subplot where
+% prompted. This will display a red square and the algorithm will re-run
+% the mouth detection for the specific frame. 
+% REMEMBER to press OK after after selecting the new mouth-area, or if
+% you're already happy with estimated area.
+
+% example
+% clear all; clc; close all;
+% DBFILEPATH='C:\MATLAB\VidTIMIT\';
+% talkers = dir(DBFILEPATH); talkers = talkers(3:end);
+% l_TALKERS=length(talkers); %no. of talkers
+% 
+% for tt=1:l_TALKERS
+%     subj  = talkers(tt).name;
+%     sents = dir(strcat(DBFILEPATH, subj,'\video')); sents = sents(3:end);
+%     l_SENTS = length(sents);
+%     for ss=1:l_SENTS%ss=4
+%         sent=sents(ss).name;
+%         if ~any([strcmp(sent,'head') strcmp(sent,'head2') strcmp(sent,'head3')]) 
+%         % exclude folders 'head', 'head2' and 'head3'.
+%         filepath=strcat(DBFILEPATH,subj,'\video\',sent);
+%         fprintf(1,'\nTalker: %s (%d of %d)\tSent: %s (%d of %d)',subj,tt,l_TALKERS,sent,ss,l_SENTS);
+%         output = lipTracker(filepath, true, true);
+% %         save(strcat('MTk_',subj,'_',sent), 'output');
+%         end
+%     end
+% end
+
+if nargin<3, flag_manual=false;
+    if nargin<2, flag_plot=false; 
+end;end;
+if flag_manual, flag_plot=true; end 
 
 pathV=filepath;
 pathA=[strrep(pathV,'video','audio'),'.wav'];
 
 items = dir(pathV); items = items(3:end);
 l_f=length(items); %no. of frames
+
 % (0) get audio RMS
 [sig,fs]=wavread(pathA); sig=sig./max(sig);
 N=length(sig)/l_f;
@@ -19,161 +74,195 @@ t=linspace(0,length(sig)/fs,l_f);
 % Selecting the two vartices of a rectangle will select the mouth area
 % (Note that the actual area that is used is an ellipse)
 % If the first selection is not accurate, repeat the process without 
-% closing the figure. A new square will appear.
+% closing the figure. A new red square appear every two clicks.
 close(figure(1));
 im1 = imread(strcat(pathV,'\',items(1).name));   
 im1d= double(im1(:,:,:));
-% f1=figure(1); 
-% imshow(im1); title 'SELECT MOUTH AREA';
-% set(f1, 'Position', get(0,'Screensize')); 
-% global ru; ru=[];
-% dcm_obj = datacursormode(gcf);
-% datacursormode on;
-% set(dcm_obj,'UpdateFcn', @myupdatefcn)
-% waitfor(f1);
-% x = min(ru(end-1,1),ru(end,1)); y = min(ru(end-1,2),ru(end,2));
-% w = abs(ru(end-1,1)-ru(end,1)); h = abs(ru(end-1,2)-ru(end,2)); 
-x =230;y=203;w=58;h=19;%comment this line
+f1=figure(1); 
+imshow(im1); title 'SELECT MOUTH AREA with mouse-clicks';
+set(f1, 'Position', get(0,'Screensize')); 
+global ru; ru=[];
+dcm_obj = datacursormode(gcf);
+datacursormode on;
+set(dcm_obj,'UpdateFcn', @myupdatefcn)
+waitfor(f1);
+
+x = min(ru(end-1,1),ru(end,1)); y = min(ru(end-1,2),ru(end,2));
+w = abs(ru(end-1,1)-ru(end,1)); h = abs(ru(end-1,2)-ru(end,2)); 
+
+% x =230;y=203;w=58;h=19; %for testing with tt=1, ss=4;
+% x=220;y=213;w=69;h=34; %for testing with tt=2, ss=9;
+
 centroid=[x+w/2; y+h/2];     
+xON = x; xOFF=x+w; %HorizontalAxis = xON:xOFF;
+yON = y; yOFF=y+h; %VerticalAxis   = yON:yOFF;
+% MouthZoneSqrd=zeros(size(im1d,1),size(im1d,2)); MouthZone(VerticalAxis,HorizontalAxis)=1; %Here selects a square area
+MouthZone= draw_elips_im(size(im1,2),size(im1,1),centroid(1),centroid(2),w/2,h/2,0);        % Here an ellipse (zero orientation)
 
-xON = x; xOFF=x+w; HorizontalAxis = xON:xOFF;
-yON = y; yOFF=y+h; VerticalAxis   = yON:yOFF;
-
-% MouthZone=zeros(size(im1d,1),size(im1d,2)); MouthZone(VerticalAxis,HorizontalAxis)=1; %Here selects a square area
-MouthZone= draw_elips_im(size(im1,2),size(im1,1),centroid(1),centroid(2),w/2,h/2,0);  % Here an ellipse
-
-% (2) estimate lipcolor with K-means algorithm
+% (2) create colour plane for mouth tracking (not sure about these values)
 r_threshold = 170; g_threshold = 70; b_threshold = 70;    
 im2 = MouthZone.*(im1d(:,:,1)*r_threshold + im1d(:,:,2)*g_threshold + im1d(:,:,3)*b_threshold); % weight
 im3 = MouthZone.*sqrt(im1d(:,:,1).^2 + im1d(:,:,2).^2 + im1d(:,:,3).^2);
-co = im2./(im3+eps);
-[a,b]=hist(co(co>0),100); % hist of colour distributions
-metd='cityblock';
-silM=zeros(5,1);
- %%% compute for up to K=5 clusters
- for K=2:5; silM(K)=mean(silhouette(b',kmeans(b,K, 'Distance',metd),metd)); end
-[cl_idx, cl_center] = kmeans(b,argmax(silM),'distance',metd,'Replicates',7);
-%[u, s, P] = fit_mix_gaussian_multiple(b',K); % consider using E.M. here
-A=smooth(a); %smooth and select the cluster with more elements
-for p=1:length(cl_center); AmplCluster(p) = A(argmin(abs(b-cl_center(p)))); end
+co  = im2./(im3+eps);
 
-LipColour = cl_center(argmax(AmplCluster));
-% TeethClr  = cl_center(argmin(AmplCluster));
-%% first estimate of ellipse parameters
-fi = find(co >= LipColour );
-% fi = find((co>LipColour*(1-.01) & co<LipColour*(1+.05)));
+% (3) estimate Lipcolor/s with K-means algorithm + E.M.
+[LipColour, SdLipColr, SkinColor]=est_lip_color(co);
+
+% Find mouth area for frame 1
+fi = find(co >= LipColour-SdLipColr );
 [a,b]   = sort(co(fi));
 mask    = zeros(size(co));
 mask(fi(b)) = 1;
-tmp = imfilter(mask, fspecial('average',[5 5]) );
-tmp(tmp<0.5) = 0; tmp(tmp>=0.5) = 1;
-tmp = imclose(tmp,strel('disk',10));
+tmp = imclose(mask,strel('disk',20));    
 B = bwconvhull_altern(tmp,'union');
-    
-    
+      
 st = regionprops(B,{'Area','MajorAxisLength','MinorAxisLength','Centroid','Orientation'});
 st=st(1);    
-fun=@(x) sum(sum(abs(draw_elips_im(size(B,2),size(B,1),x(1),x(2),x(3),x(4),x(5))-B))); %cost function
-%     EllipVals = fminsearch(fun,[st.Centroid(1) st.Centroid(2) st.MajorAxisLength/2 st.MinorAxisLength/2]);
-% Acon=[1 0 0 0 0; -1 0 0 0 0; 0 1 0 0 0; 0 -1 0 0 0; 0 0 1 0 0; 0 0 -1 0 0; 0 0 0 1 0; 0 0 0 -1 0; 0 0 0 0 1; 0 0 0 0 -1];
-% bcon=[oldCx*(1+tol10); oldCx*(tol10-1); oldCy*(1+tol10); oldCy*(tol10-1); oldMAx*(1+tol10); oldMAx*(tol10-1); oldmAx*(1+tol10); oldmAx*(tol10-1);  oldOri*(1+tol10); oldOri*(tol10-1);];
+% Optimize relative to an ellipse
+% fun=@(x) sum(sum(abs(draw_elips_im(size(B,2),size(B,1),x(1),x(2),x(3),x(4),x(5))-B))); %cost function
+% %     EllipVals = fminsearch(fun,[st.Centroid(1) st.Centroid(2) st.MajorAxisLength/2 st.MinorAxisLength/2]);
+% % Acon=[1 0 0 0 0; -1 0 0 0 0; 0 1 0 0 0; 0 -1 0 0 0; 0 0 1 0 0; 0 0 -1 0 0; 0 0 0 1 0; 0 0 0 -1 0; 0 0 0 0 1; 0 0 0 0 -1];
+% % bcon=[oldCx*(1+tol10); oldCx*(tol10-1); oldCy*(1+tol10); oldCy*(tol10-1); oldMAx*(1+tol10); oldMAx*(tol10-1); oldmAx*(1+tol10); oldmAx*(tol10-1);  oldOri*(1+tol10); oldOri*(tol10-1);];
 % EllipVals = fminsearch(fun,[st.Centroid(1) st.Centroid(2) st.MajorAxisLength/2 st.MinorAxisLength/2 st.Orientation]);
 % oldCx=EllipVals(1); oldCy=EllipVals(2); oldMAx=EllipVals(3); oldmAx=EllipVals(4); oldOri=EllipVals(4);
-AreaIn=st.Area; MaxArea=(1+20/100)*st.Area; MinArea=(1-10/100)*st.Area;
-%%
+
+% Area0=AreaIn; MaxArea=(1+20/100)*st.Area; MinArea=(1-10/100)*st.Area;
+AreaIn=st.Area;  MZold=MouthZone; 
+
 if flag_plot, f1=figure(1); set(f1, 'Position', get(0,'Screensize'));  end
-LipStat=NaN(7,length(items));
-for k=1:length(items)
+LipStat=NaN(7,length(items)); %initialize
+
+k = 1; %start from frame number
+while k<=length(items)
+    
+    % (0) load frame
     im1 = imread(strcat(pathV,'\',items(k).name));   
     im1d= double(im1(:,:,:));
 
+    % (1) create colour plane 
     r_threshold = 170; g_threshold = 70; b_threshold = 70;    
     im2 = MouthZone.*(im1d(:,:,1)*r_threshold + im1d(:,:,2)*g_threshold + im1d(:,:,3)*b_threshold); % weight
     im3 = MouthZone.*sqrt(im1d(:,:,1).^2 + im1d(:,:,2).^2 + im1d(:,:,3).^2);
     co = im2./(im3+eps);
     
-    fi = find(co >= LipColour );
+    % (2) move colour levels != from lip to the skin cluster
+    co2=co; co2(co2<LipColour-2.5*SdLipColr & co2>0)=SkinColor+.1*randn(1,length(co2(co2<LipColour-2.5*SdLipColr & co2>0))); co=co2; clear co2;
+    
+    % (3) re-estimate lip colour
+    [LipColour, SdLipColr]=est_lip_color(co,LipColour,SdLipColr);
+    if flag_plot, fprintf(1,'\n%d:\tLipColour%.1f; SdLipColr: %.1f',k,LipColour,SdLipColr); end
+    
+
+    % (4) filter clusters
+    %     fi = find(co>=LipColour-SdLipColr & co<=LipColour+2*SdLipColr);
+    fi = find(co>=LipColour-SdLipColr);
     [a,b]   = sort(co(fi));
     mask    = zeros(size(co));
     mask(fi(b)) = 1;
-    tmp = imfilter(mask,fspecial('average',[5 5])); %create averaging filter
-    tmp(tmp < 0.5)  = 0;  tmp(tmp >= 0.5) = 1;
-    tmp = imclose(tmp,strel('disk',10));
-    B = bwconvhull_altern(tmp,'union');
+    %    mask=smooth_expin(mask,4,4); %additional smoother, not necessary
+    tmp = imclose(mask,strel('disk',20));    
     
-%     comp = zeros(1,length(st)); 
-%     for kk = 1:size_st, comp(kk) = st(kk).MajorAxisLength; end
-%     maxval = max(comp);
-%     maxind = find(comp == maxval);    
+    % (5) binarize and get shapes
+    B = bwconvhull_altern(tmp,'union');    
     st = regionprops(B,{'FilledImage','Area','MajorAxisLength','MinorAxisLength','Centroid','Orientation','Eccentricity','Extrema'});
     maxind=1; st=st(maxind);    
-    tol10=20/100; tol05=15/100;
+
+%     % Alterntively, fit an ellipse
+%     tol10=20/100; tol05=15/100;
 %     Acon=[1 0 0 0 0; -1 0 0 0 0; 0 1 0 0 0; 0 -1 0 0 0; 0 0 1 0 0; 0 0 -1 0 0; 0 0 0 1 0; 0 0 0 -1 0; 0 0 0 0 1; 0 0 0 0 -1];
 %     bcon=[oldCx*(1+tol10); oldCx*(tol10-1); oldCy*(1+tol10); oldCy*(tol10-1); oldMAx*(1+tol10); oldMAx*(tol10-1); oldmAx*(1+tol05); oldmAx*(tol05-1);  oldOri*(1+tol05); oldOri*(tol05-1);];
 %     EllipVals = fmincon(fun,[st.Centroid(1) st.Centroid(2) st.MajorAxisLength/2 st.MinorAxisLength/2 st.Orientation],Acon,bcon);
-%     oldCx=EllipVals(1); 
-%     oldCy=EllipVals(2);     
-%     oldMAx=EllipVals(3);    
-%     oldmAx=EllipVals(4);
-%     oldOri=EllipVals(4);
+%     oldCx=EllipVals(1); oldCy=EllipVals(2); oldMAx=EllipVals(3); oldmAx=EllipVals(4); oldOri=EllipVals(4);
 %     B2=draw_elips_im(size(B,2),size(B,1),EllipVals(1),EllipVals(2),EllipVals(3),EllipVals(4),EllipVals(5));
-%     [xx,yy]=find(((imdilate(B,strel('disk',1))-B))==1);    
+    
+    % (6) Apply smoothness constraints
+    TolAPr=60/100;
+    AreaDiff = (st.Area-AreaIn)/AreaIn;
+    %if the area computed for this frame is too different from that of previous
+    %frame, discard computation. This is over-ruled when running the script
+    %with flag_manual=true (see below).
+    if abs(AreaDiff)>TolAPr, st=oldst; fprintf(1,' - NOT COUNT');
+    else    MouthZone= imdilate(draw_elips_im(size(im1,2),size(im1,1),...
+                max(centroid(1)-15,min(centroid(1)+15,st.Centroid(1))),...
+                max(centroid(2)-15,min(centroid(2)+15,st.Centroid(2))),...
+                w/2,2*h/3,max(-8,min(+8,st.Orientation))),strel('disk',2));
+            oldst=st;
+    end
 
-if abs(st.Area-AreaIn)/AreaIn<40/100
-    MouthZone = imdilate(B,strel('disk',8));
-    AreaIn=st.Area;
-    oldst=st;
-else
-    st=oldst;
-end
+    % (6.b) consider re-estimating the frame
+    if flag_manual && k>1
+        % for frames>1, check that the selected mouth area is correct
+        % The user can use mouse-clicks to re-run the lip tracking algorithm
+        % for that frame. Otherwise, simply click OK.
+        
+        uicontrol('Style', 'pushbutton', 'String', {'OK' 'next frame'},...
+                       'Position', [870 480 150 30],...
+                       'Callback', 'uiresume(gcbf)');
+        drawnow();                   
 
-    % Extract information about blob
-    LipStat(1,k) = st(maxind).Area; % mouth area
-    LipStat(2,k) = st(maxind).MajorAxisLength; % width of mouth opening
-    LipStat(3,k) = st(maxind).MinorAxisLength; % height of mouth opening
-    LipStat(4,k) = maxind; % tells you which field the info was extracted from - should be the same across all frames!
+
+        % (6.b.1) show search area, selected area and open GUI to modify selection
+        face(:,:,1)=double(im1(:,:,1)).*(1-(imdilate(MZold,strel('disk',3))-MZold)-1.*(imdilate(B,strel('disk',3))-B));   
+        face(:,:,2)=double(im1(:,:,2)).*(1-(imdilate(MZold,strel('disk',3))-MZold)-0.*(imdilate(B,strel('disk',3))-B)); 
+        face(:,:,3)=double(im1(:,:,3)).*(1-(imdilate(MZold,strel('disk',3))-MZold)-0.*(imdilate(B,strel('disk',3))-B)); 
+        subplot(224); hold off; imshow(uint8(face)); axis([xON-10 xOFF+10 yON-15 yOFF+15]); title(['Mouth selection for next frame (#', num2str(k) ,'). OK/Re-select area']);
+
+        % (6.b.2) get new mouth area from the user
+        ru=[]; 
+        dcm_obj = datacursormode(gcf); datacursormode on;
+        set(dcm_obj,'UpdateFcn', @myupdatefcn)
+        uiwait(f1); 
+        if ~isempty(ru) %if the user inputs a new mouth area
+        if iseven(size(ru,1))
+        x = min(ru(end-1,1),ru(end,1)); y = min(ru(end-1,2),ru(end,2));
+        w = abs(ru(end-1,1)-ru(end,1)); h = abs(ru(end-1,2)-ru(end,2)); 
+        centroid=[x+w/2; y+h/2];     
+        MouthZone= draw_elips_im(size(im1,2),size(im1,1),centroid(1),centroid(2),w/2,h/2,0);        % Here an ellipse (zero orientation)
+        
+        % (6.b.3) 
+        k=k-1; % reset index to re-compute the mouth area for this frame
+        end
+        end
+    end
+        
+    % Save info 
+    LipStat(1,k) = st.Area; % mouth area
+    LipStat(2,k) = st.MajorAxisLength; % width of mouth opening
+    LipStat(3,k) = st.MinorAxisLength; % height of mouth opening
+    LipStat(4,k) = LipColour; % lip colour for this frame
     LipStat(5,k) = mean2(imfilter(co.*B, fspecial('laplacian'), 'replicate', 'conv').^2); %extract color gradient
     LipStat(6,k) = st(maxind).Centroid(1);
     LipStat(7,k) = st(maxind).Centroid(2);
 
-% Apply smoothness constraints
-%     if ((st.Area<=MaxArea) && (st.Area>=MinArea)) ...
-%             && ((st.Area)-AreaIn)>10/100%%pdist([centroids LipStat([6 7],k)]','euclidean')<10
-%         MouthZone = imdilate(B,strel('disk',8));
-%         AreaIn=st.Area;
-%     end
-%         MouthZone = imdilate(B,strel('disk',8));
-        
-%     display
-    if flag_plot
-        face(:,:,1)=double(im1(:,:,1)).*(1-(imdilate(MouthZone,strel('disk',4))-MouthZone));   
-        face(:,:,2)=double(im1(:,:,2)).*(1-(imdilate(MouthZone,strel('disk',4))-MouthZone)); 
-        face(:,:,3)=double(im1(:,:,3)).*(1-(imdilate(MouthZone,strel('disk',4))-MouthZone)); 
-        subplot(221); imshow(uint8(face)); title('search area')
-        face(:,:,1)=double(im1(:,:,1)).*(1-(imdilate(B,strel('disk',4))-B));   
-        face(:,:,2)=double(im1(:,:,2)).*(1-(imdilate(B,strel('disk',4))-B)); 
-        face(:,:,3)=double(im1(:,:,3)).*(1-(imdilate(B,strel('disk',4))-B)); 
-        subplot(222); imshow(uint8(face)); title('seleced mouth area');%     ff1=figure(12); imshow(face_a); set(ff1,'position',[150 100 500 500]);
-%         face(:,:,1)=double(im1(:,:,1)).*(1-(imdilate(B2,strel('disk',4))-B2));   
-%         face(:,:,2)=double(im1(:,:,2)).*(1-(imdilate(B2,strel('disk',4))-B2)); 
-%         face(:,:,3)=double(im1(:,:,3)).*(1-(imdilate(B2,strel('disk',4))-B2)); 
-%         subplot(223); imshow(uint8(face)); title('seleced mouth area');%     ff1=figure(12); imshow(face_a); set(ff1,'position',[150 100 500 500]);
-        pause(1e-4);
-        set(gcf, 'Position', get(0,'Screensize')); 
-        subplot(224); imagesc(co); axis([200 350 150 250]);
+    % Display info
+    if flag_plot 
+        face(:,:,1)=double(im1(:,:,1)).*(1-(imdilate(MZold,strel('disk',3))-MZold)-1.*(imdilate(B,strel('disk',3))-B));   
+        face(:,:,2)=double(im1(:,:,2)).*(1-(imdilate(MZold,strel('disk',3))-MZold)-0.*(imdilate(B,strel('disk',3))-B)); 
+        face(:,:,3)=double(im1(:,:,3)).*(1-(imdilate(MZold,strel('disk',3))-MZold)-0.*(imdilate(B,strel('disk',3))-B)); 
+        subplot(222); imshow(uint8(face)); title(['seleced mouth area; frame: ',num2str(k)]);%     ff1=figure(12); imshow(face_a); set(ff1,'position',[150 100 500 500]);
+        subplot(221); histn(co(co>0),100); hold on; plot([LipColour LipColour],[0 1],'r',[LipColour-SdLipColr LipColour-SdLipColr],[0 1],'--r',[LipColour+SdLipColr LipColour+SdLipColr],[0 1],'--r'); axis([SkinColor-8 LipColour+8 0 1.05]); hold off; title 'colour hist';
+        subplot(223); imagesc(co<LipColour); axis([xON-20 xOFF+20 yON-20 yOFF+20]); title 'only lip pixels';
+        if ~flag_manual
+            subplot(224); imagesc(co); axis([xON-20 xOFF+20 yON-20 yOFF+20]); title 'selected on the colour plane';'';
+        end
+        drawnow()
+        set(gcf, 'Position', get(0,'Screensize'));    
+        MZold=MouthZone; % save search area       
 %         pause
     end
     
-    if k/4==fix(k/4), fprintf(1,'.'); end
-  
+    if k/4==fix(k/4), fprintf(1,'.'); end %display '.' to screen
+
+    k=k+1;
 end
-%% display
-if flag_plot
+%% final plot with
+if flag_plot 
     ym=normaNr(LipStat(1,:),min(Rms),max(Rms)); yr=smooth(Rms)';
-    figure(31); plot(t,ym,'-k.',t,yr,'r-',t,0.25*(abs(ym-yr)),'--b','linewidth',3); 
-    legend('m-SNR','s-SNR',['r=',num2str(corr(ym',yr'),2),' ;e=',num2str(rmse(ym,yr),2)],'location','best');
+    figure(31); plot(t,ym,'-k.',t,yr,'r-','linewidth',3); 
+    legend('m-SNR','s-SNR','location','best'); title(['r=',num2str(corr(ym',yr'),2),' ;e=',num2str(rmse(ym,yr),2)]);    
 end
 
+% output data
 output = struct;
 output.LipStat   = LipStat;
 output.RMS       = Rms;
@@ -187,79 +276,60 @@ output.startArea = [xON xOFF yON yOFF];
 
 end %EoF
 
-function P = bwconvhull_alt(BW)
+function [LipColour, SdLipColr, SkinColor]=est_lip_color(co,prevLC,prevSD)
 
-% usage: 
-% - BW is the input binary image
-% - P is a binary image wherein the convex hull of objects are returned
-% P = bwconvhull_alt(BW);
+[a,b]=hist(co(co>0),100); % hist of colour distributions
+metd='cityblock';
+silM=zeros(5,1);
+ %%% compute for up to K=5 clusters
+ for K=2:5; silM(K)=mean(silhouette(b',kmeans(b,K, 'Distance',metd),metd)); end
 
-warning off all
-s=regionprops(logical(BW),'ConvexImage','BoundingBox');
-P=zeros(size(BW));
-for no=1:length(s)
-    P(s(no).BoundingBox(2):s(no).BoundingBox(2)+s(no).BoundingBox(4)-1,...
-        s(no).BoundingBox:s(no).BoundingBox(1)+s(no).BoundingBox(3)-1)=s(no).ConvexImage;
+ %%% find clusters
+ [cl_idx, cl_center] = kmeans(b,argmax(silM),'distance',metd,'Replicates',7);
+
+A=smooth(a); %smooth and select the cluster with more elements
+for p=1:length(cl_center); AmplCluster(p) = A(argmin(abs(b-cl_center(p)))); end
+
+% use apriori about lip color being "redder" than skin
+LipColour = max(cl_center);% LipColour = cl_center(argmax(AmplCluster));
+SkinColor = min(cl_center);% SkinColor = cl_center(argmin(AmplCluster));
+
+%find std of guassians
+[u, s] = fit_mix_gaussian_multiple(b',length(cl_center)); % E.M.
+SdLipColr = s(argmin(abs(u-LipColour)));
+
+%average with previous values
+if nargin==3,   LipColour = (LipColour + prevLC)/2;
+                SdLipColr = (SdLipColr + prevSD)/2;    
 end
 
-end
+end %EoF
+% function P = bwconvhull_alt(BW)
+% 
+% % usage: 
+% % - BW is the input binary image
+% % - P is a binary image wherein the convex hull of objects are returned
+% % P = bwconvhull_alt(BW);
+% 
+% warning off all
+% s=regionprops(logical(BW),'ConvexImage','BoundingBox');
+% P=zeros(size(BW));
+% for no=1:length(s)
+%     P(s(no).BoundingBox(2):s(no).BoundingBox(2)+s(no).BoundingBox(4)-1,...
+%         s(no).BoundingBox:s(no).BoundingBox(1)+s(no).BoundingBox(3)-1)=s(no).ConvexImage;
+% end
+% 
+% end%EoF
 
+function histn(D,N)
+% custom normalized hist
+[h, a] = hist(D,N); %N= 100 bins.
+h = h/sum(h); % normalize to unit length. Sum of h now will be 1.
+h = norma(h);
+bar(a,h); 
+end   
 function convex_hull = bwconvhull_altern(varargin)
-%BWCONVhull Generate convex hull image from binary image.
-%   CH = BWCONVHULL(BW) computes the convex hull of all objects in BW and
-%   returns CH, binary convex hull image.  BW is a logical 2D image and CH
-%   is a logical convex hull image, containing the binary mask of the
-%   convex hull of all foreground objects in BW.
-%
-%   CH = BWCONVHULL(BW,METHOD) specifies the desired method for computing
-%   the convex hull image.  METHOD is a string and may have the following
-%   values:
-%
-%      'union'   : Compute convex hull of all foreground objects, treating
-%                  them as a single object.  This is the default method.
-%      'objects' : Compute the convex hull of each connected component of
-%                  BW individually.  CH will contain the convex hulls of
-%                  each connected component.
-%
-%   CH = BWCONVHULL(BW,'objects',CONN) specifies the desired connectivity
-%   used when defining individual foreground objects.  The CONN parameter
-%   is only valid when the METHOD is 'objects'.  CONN may have the
-%   following scalar values:
-%
-%      4 : two-dimensional four-connected neighborhood
-%      8 : two-dimensional eight-connected neighborhood {default}
-%
-%   Additionally, CONN may be defined in a more general way, using a 3-by-3
-%   matrix of 0s and 1s.  The 1-valued elements define neighborhood
-%   locations relative to the center element of CONN.  CONN must be
-%   symmetric about its center element.
-%
-%   Example
-%   -------
-%   subplot(2,2,1);
-%   I = imread('coins.png');
-%   imshow(I);
-%   title('Original');
-%   
-%   subplot(2,2,2);
-%   BW = I > 100;
-%   imshow(BW);
-%   title('Binary');
-%   
-%   subplot(2,2,3);
-%   CH = bwconvhull(BW);
-%   imshow(CH);
-%   title('Union Convex Hull');
-%   
-%   subplot(2,2,4);
-%   CH_objects = bwconvhull(BW,'objects');
-%   imshow(CH_objects);
-%   title('Objects Convex Hull');
-%
-%   See also BWCONNCOMP, BWLABEL, LABELMATRIX, REGIONPROPS.
 
-%   Copyright 2010 The MathWorks, Inc.
-%   $Revision: 1.1.6.7 $  $Date: 2011/08/09 17:49:02 $
 
 [BW, method, conn] = parseInputs(varargin{:});
 
@@ -354,7 +424,7 @@ if ~is_valid_matrix
     error(message('images:bwconvhull:invalidConnectivity'))
 end
 end
-end
+end%EoF
 
 
 function [u,sig,P,t,iter] = fit_mix_gaussian_multiple( X, K )
@@ -412,9 +482,10 @@ while ((( abs((step/last_step)-1) > thresh) && (step>(N*eps)) && iter<max_iter )
 end
 
 sig     = sqrt( sig2 );
-end
+end%EoF
 
 function txt = myupdatefcn(empty, event_obj)
+  % draws a red square in the image every two button-clicks
   global ru
   txt = {''};
   ru(end+1,:)=event_obj.Position;
@@ -429,9 +500,10 @@ function txt = myupdatefcn(empty, event_obj)
       ru=[];
       delete(findobj(allchild(gcf), 'Tag', 'myRect'))
   end
-end
+end%EoF
 
 function [Y]=normaNr(x,m,M)
+% normalise the input
 if size(x,2)==1
     Y=(x-min(x))/(max(x)-min(x))*(M-m)+m;
 else
@@ -449,13 +521,21 @@ if part>0, x=1;
 else       x=0;   
 end
 x=~x;
-end
+end%EoF
 function x = isodd(number)
 x=~iseven(number);    
-end
+end%EoF
 
 function ellipsePixels = draw_elips_im(imageSizeX,imageSizeY,centerX,centerY,radiusX,radiusY,Orient)
- %%
+% draws an elliupse
+if nargin==3
+    tmp=centerX;
+    centerX   =tmp(1);
+    centerY   =tmp(2);
+    radiusX   =tmp(3);
+    radiusY   =tmp(4);
+    Orient    =tmp(5);
+end
 % imageSizeX = 640; imageSizeY = 480;
 [columnsInImage rowsInImage] = meshgrid(1:imageSizeX, 1:imageSizeY);
 % Next create the ellipse in the image.
@@ -464,4 +544,9 @@ ellipsePixels = ...
     (rowsInImage - centerY).^2 ./ radiusY^2 + (columnsInImage - centerX).^2 ./ radiusX^2 <= 1;
 
 ellipsePixels = imrotate(ellipsePixels,Orient,'crop');
-end
+end %EoF
+
+% function y=Nhside(x)
+% % negative heaviside function
+% y=0; if x>0, y=1; elseif x<0, y=-1; end
+% end %EoF
