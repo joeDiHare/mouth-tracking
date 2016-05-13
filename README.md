@@ -41,6 +41,7 @@ DBFILEPATH='C:\MATLAB\VidTIMIT\';
 talkers = dir(DBFILEPATH); talkers = talkers(3:end);
 l_TALKERS=length(talkers); %no. of talkers
 
+```matlab
 for tt=1:l_TALKERS
     subj  = talkers(tt).name;
     sents = dir(strcat(DBFILEPATH, subj,'\video')); sents = sents(3:end);
@@ -56,3 +57,4 @@ for tt=1:l_TALKERS
         end
     end
 end
+```
