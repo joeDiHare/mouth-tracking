@@ -1,37 +1,39 @@
 function output = lipTracker(filepath,flag_plot,flag_manual)
 %%% script to perform computation of mouth area
 %%% [SC] May-16
-% This script performs a computation of the mouth area (including lip)
-
+% This script performs a computation of the mouth area (including lips)
 % using mostly hue. The algorithm performs a computation of the colour
 % clusters (mostly skin and lip) using k-means algorithm. The standard
-% deviation of these clusters is estimated fitting up to 5 gaussian
-% distributions to the histogram of the color levles (optimization done
-% through E.M.). To improve the algorithm, some smoothness is applied
+% deviation of these clusters is estimated by fitting up to 5 gaussian
+% distributions to the histogram of the color leveles (optimization done
+% with E.M.). To improve the algorithm, some smoothness is applied
 % between frames, so that the area cannot vary >60% between consecutive
 % frames, and the "search area" for the lips also varies accordingly. 
-% The user needs to initiate the alforithm by selecting the search area in
-% the first fram using a GUI.
+% The user needs to initiate the algorithm by selecting the search area in
+% the first frame using the prompted GUI.
 
 % This algorithm was tested ONLY with the VidTIMIT database. If your videos
 % have different format, you'll probably need to modify the code accordingly. 
 
 % input:   
 % - filepath. This refers to a location that containts both video and
-%   audio. For VidTIMIT, frames and audio comes in different folders. 
-%   See the example below.
-% - flag_plot. Plot ongoing lip detection.
-% - flag_manual. When the algorithm fails, run with flag_manual=true to check that each frame is labelled correctly and, if necessary, correct the mouth area.
+%   audio. For VidTIMIT, frames and audio are in separate folders. 
+%   (See example below.)
+% - flag_plot. Plot frame-by-frame the results of lip detection/traking.
+% - flag_manual. When the algorithm fails, run with flag_manual=true to
+%   check that each frame is labelled correctly and, if necessary, correct 
+%   the mouth area.
 
 % With flag_manual=true, the user will be prompted to check that the
 % correct mouth area has been selected. If the user intends to select a
-% different area, the user needs to click twice in the subplot where
-% prompted. This will display a red square and the algorithm will re-run
-% the mouth detection for the specific frame. 
-% REMEMBER to press OK after after selecting the new mouth-area, or if
-% you're already happy with estimated area.
+% different area, the user needs to click twice in the subplot 2.24. 
+% This will display a red square and the algorithm will re-run to detect
+% the mouth for that frame. 
+% REMEMBER to always press OK after after selecting the new mouth-area, or 
+% if you're already happy with estimated area.
 
-% example
+% Example: How to run this script.
+% 
 % clear all; clc; close all;
 % DBFILEPATH='C:\MATLAB\VidTIMIT\';
 % talkers = dir(DBFILEPATH); talkers = talkers(3:end);
@@ -64,13 +66,13 @@ pathA=[strrep(pathV,'video','audio'),'.wav'];
 items = dir(pathV); items = items(3:end);
 l_f=length(items); %no. of frames
 
-% (0) get audio RMS
+% (0) Get audio RMS
 [sig,fs]=wavread(pathA); sig=sig./max(sig);
 N=length(sig)/l_f;
 for n=1:l_f, Rms(n) = rms(sig(1+(n-1)*N:n*N)); end
 t=linspace(0,length(sig)/fs,l_f);
 
-% % (1) manually select mouth area
+% % (1) Manually select mouth area
 % Selecting the two vartices of a rectangle will select the mouth area
 % (Note that the actual area that is used is an ellipse)
 % If the first selection is not accurate, repeat the process without 
