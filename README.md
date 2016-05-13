@@ -4,6 +4,7 @@ This script performs a computation of the mouth area (including lips)
 using mostly hue. 
 
 Check the demo here >> https://youtu.be/EcEZTZqkrK0 << 
+
 The algorithm performs a computation of the colour
 clusters (mostly skin and lip) using k-means algorithm. The standard
 deviation of these clusters is estimated by fitting up to 5 gaussian
