@@ -36,12 +36,12 @@ if you're already happy with estimated area.
 
 Example: How to run this script.
 
+```matlab
 clear all; clc; close all;
 DBFILEPATH='C:\MATLAB\VidTIMIT\';
 talkers = dir(DBFILEPATH); talkers = talkers(3:end);
 l_TALKERS=length(talkers); %no. of talkers
 
-```matlab
 for tt=1:l_TALKERS
     subj  = talkers(tt).name;
     sents = dir(strcat(DBFILEPATH, subj,'\video')); sents = sents(3:end);
